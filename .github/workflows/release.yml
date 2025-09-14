@@ -9,28 +9,50 @@ jobs:
   win:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgJsonGlob: '**/vcpkg.json'
-          vcpkgDirectory: '${{ runner.temp }}\vcpkg'
-      - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=${{ runner.temp }}\vcpkg\scripts\buildsystems\vcpkg.cmake
-      - name: Build
-        run: cmake --build build --config Release
-      - name: Package
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Install vcpkg and SFML without manifest/baseline ---
+      - name: Install vcpkg
         shell: pwsh
         run: |
-          $dist="dist"; New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          git clone https://github.com/microsoft/vcpkg $env:RUNNER_TEMP/vcpkg
+          & $env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat
+
+      - name: Install SFML (x64-windows)
+        shell: pwsh
+        run: |
+          & $env:RUNNER_TEMP/vcpkg/vcpkg.exe install sfml:x64-windows
+
+      # --- Configure & build with the vcpkg toolchain ---
+      - name: Configure (MSVC x64 Release)
+        run: >
+          cmake -S . -B build
+          -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
+        env:
+          VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # --- Package exe + all required DLLs ---
+      - name: Package
+        shell: pwsh
+        env:
+          VCPKG_BIN: ${{ runner.temp }}\vcpkg\installed\x64-windows\bin
+        run: |
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item build\Release\whiteboard.exe $dist\
-          $bin="${{ runner.temp }}\vcpkg\installed\x64-windows\bin"
-          Copy-Item "$bin\sfml-*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$bin\zlib*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$bin\freetype*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$bin\jpeg*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$bin\openal*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$env:VCPKG_BIN\sfml-*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$env:VCPKG_BIN\zlib*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$env:VCPKG_BIN\freetype*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$env:VCPKG_BIN\jpeg*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$env:VCPKG_BIN\openal*.dll" $dist\ -ErrorAction SilentlyContinue
           Set-Content "$dist\README.txt" "Double-click whiteboard.exe to run."
           Compress-Archive -Path $dist\* -DestinationPath whiteboard-windows.zip -Force
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
