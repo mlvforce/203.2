@@ -1,60 +1,75 @@
-name: Build & Release (Windows)
+name: Build & Release (Windows - MSYS2)
 
 on:
   workflow_dispatch:
   push:
-    tags: [ 'v*' ]
+    tags: [ 'v*' ]   # optional: publish a Release when you push a tag like v1.0.0
 
 jobs:
-  win:
+  win-mingw:
     runs-on: windows-2022
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- Install vcpkg and SFML without manifest/baseline ---
-      - name: Install vcpkg
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg $env:RUNNER_TEMP/vcpkg
-          & $env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat
+      # Install MSYS2 + MinGW64 toolchain + SFML + CMake + Ninja
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-sfml
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
 
-      - name: Install SFML (x64-windows)
-        shell: pwsh
+      # Configure + build using MinGW64 (no vcpkg required)
+      - name: Configure (Ninja, Release)
+        shell: msys2 {0}
         run: |
-          & $env:RUNNER_TEMP/vcpkg/vcpkg.exe install sfml:x64-windows
-
-      # --- Configure & build with the vcpkg toolchain ---
-      - name: Configure (MSVC x64 Release)
-        run: >
-          cmake -S . -B build
-          -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
-        env:
-          VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++
 
       - name: Build
+        shell: msys2 {0}
         run: cmake --build build --config Release
 
-      # --- Package exe + all required DLLs ---
+      # Package EXE + needed DLLs from Mingw64 bin
       - name: Package
-        shell: pwsh
-        env:
-          VCPKG_BIN: ${{ runner.temp }}\vcpkg\installed\x64-windows\bin
+        shell: bash
         run: |
-          $dist = "dist"
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item build\Release\whiteboard.exe $dist\
-          Copy-Item "$env:VCPKG_BIN\sfml-*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$env:VCPKG_BIN\zlib*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$env:VCPKG_BIN\freetype*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$env:VCPKG_BIN\jpeg*.dll" $dist\ -ErrorAction SilentlyContinue
-          Copy-Item "$env:VCPKG_BIN\openal*.dll" $dist\ -ErrorAction SilentlyContinue
-          Set-Content "$dist\README.txt" "Double-click whiteboard.exe to run."
-          Compress-Archive -Path $dist\* -DestinationPath whiteboard-windows.zip -Force
+          set -e
+          DIST="dist"
+          mkdir -p "$DIST"
+          cp -v build/whiteboard.exe "$DIST"/
+
+          # Gather SFML and common runtime dlls
+          BIN="/mingw64/bin"
+          cp -v $BIN/libsfml-*-2.dll "$DIST"/ || true
+          cp -v $BIN/libfreetype-6.dll "$DIST"/ || true
+          cp -v $BIN/libjpeg-8.dll "$DIST"/ || true
+          cp -v $BIN/zlib1.dll "$DIST"/ || true
+          cp -v $BIN/libbz2-1.dll "$DIST"/ || true
+          cp -v $BIN/libopenal-1.dll "$DIST"/ || true
+          cp -v $BIN/libstdc++-6.dll "$DIST"/ || true
+          cp -v $BIN/libgcc_s_seh-1.dll "$DIST"/ || true
+          cp -v $BIN/libwinpthread-1.dll "$DIST"/ || true
+
+          printf "Double-click whiteboard.exe to run.\n" > "$DIST/README.txt"
+          7z a -tzip whiteboard-windows.zip "$DIST"/*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: whiteboard-windows
           path: whiteboard-windows.zip
+
+      # Optional: publish a GitHub Release if you pushed a tag vX.Y.Z
+      - name: Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: whiteboard-windows.zip
