@@ -36,28 +36,35 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build --config Release
 
-      # Copy required DLLs manually from /mingw64/bin
+   
+           # Copy required DLLs and zip using PowerShell (no 7z needed)
       - name: Package
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          set -e
-          DIST="dist"
-          mkdir -p "$DIST"
-          cp -v build/whiteboard.exe "$DIST"/
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-          BIN="/mingw64/bin"
-          cp -v $BIN/libsfml-*-2.dll "$DIST"/ || true
-          cp -v $BIN/libfreetype-6.dll "$DIST"/ || true
-          cp -v $BIN/libjpeg-8.dll "$DIST"/ || true
-          cp -v $BIN/zlib1.dll "$DIST"/ || true
-          cp -v $BIN/libbz2-1.dll "$DIST"/ || true
-          cp -v $BIN/libopenal-1.dll "$DIST"/ || true
-          cp -v $BIN/libstdc++-6.dll "$DIST"/ || true
-          cp -v $BIN/libgcc_s_seh-1.dll "$DIST"/ || true
-          cp -v $BIN/libwinpthread-1.dll "$DIST"/ || true
+          # Copy the exe (built in the previous MSYS2 steps)
+          Copy-Item build\whiteboard.exe $dist\
 
-          echo "Double-click whiteboard.exe to run." > "$DIST/README.txt"
-          7z a -tzip whiteboard-windows.zip "$DIST"/*
+          # DLLs live under the MSYS2 MinGW path on the GitHub runner:
+          $BIN = "C:\msys64\mingw64\bin"
+
+          # SFML + common runtime DLLs
+          Copy-Item "$BIN\libsfml-*-2.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libfreetype-6.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libjpeg-8.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\zlib1.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libbz2-1.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libopenal-1.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libstdc++-6.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libgcc_s_seh-1.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$BIN\libwinpthread-1.dll" $dist\ -ErrorAction SilentlyContinue
+
+          Set-Content "$dist\README.txt" "Double-click whiteboard.exe to run."
+
+          # Zip it (built-in)
+          Compress-Archive -Path $dist\* -DestinationPath whiteboard-windows.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
