@@ -1,0 +1,38 @@
+name: Build & Release (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  win:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: '**/vcpkg.json'
+          vcpkgDirectory: '${{ runner.temp }}\vcpkg'
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=${{ runner.temp }}\vcpkg\scripts\buildsystems\vcpkg.cmake
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        shell: pwsh
+        run: |
+          $dist="dist"; New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item build\Release\whiteboard.exe $dist\
+          $bin="${{ runner.temp }}\vcpkg\installed\x64-windows\bin"
+          Copy-Item "$bin\sfml-*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$bin\zlib*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$bin\freetype*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$bin\jpeg*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$bin\openal*.dll" $dist\ -ErrorAction SilentlyContinue
+          Set-Content "$dist\README.txt" "Double-click whiteboard.exe to run."
+          Compress-Archive -Path $dist\* -DestinationPath whiteboard-windows.zip -Force
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whiteboard-windows
+          path: whiteboard-windows.zip
