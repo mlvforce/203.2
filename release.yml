@@ -1,0 +1,54 @@
+name: Build & Release (Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'        # e.g. v1.0.0
+  workflow_dispatch:
+
+jobs:
+  win-release:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup vcpkg (sfml)
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: '**/vcpkg.json'
+          vcpkgDirectory: '${{ runner.temp }}\vcpkg'
+
+      - name: Configure (MSVC x64 Release)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=${{ runner.temp }}\vcpkg\scripts\buildsystems\vcpkg.cmake
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package app + DLLs
+        shell: pwsh
+        run: |
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item build\Release\whiteboard.exe $dist\
+          $vcpkgbin = "${{ runner.temp }}\vcpkg\installed\x64-windows\bin"
+          Copy-Item "$vcpkgbin\sfml-*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$vcpkgbin\zlib*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$vcpkgbin\freetype*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$vcpkgbin\jpeg*.dll" $dist\ -ErrorAction SilentlyContinue
+          Copy-Item "$vcpkgbin\openal*.dll" $dist\ -ErrorAction SilentlyContinue
+          Set-Content "$dist\README.txt" "Double-click whiteboard.exe to run. No install required."
+          Compress-Archive -Path $dist\* -DestinationPath whiteboard-windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whiteboard-windows
+          path: whiteboard-windows.zip
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: whiteboard-windows.zip
+          generate_release_notes: true
