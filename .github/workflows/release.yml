@@ -12,7 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # MSYS2 + MinGW64 + SFML + tools
+      # Install MSYS2 with MinGW toolchain + SFML + tools
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -22,9 +22,8 @@ jobs:
             mingw-w64-x86_64-sfml
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
-            ntldd-git
 
-      # Configure & build (MinGW64)
+      # Configure + build using MinGW
       - name: Configure (Ninja, Release)
         shell: msys2 {0}
         run: |
@@ -37,21 +36,26 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build --config Release
 
-      # Collect ALL required DLLs using ntldd (recursive)
-      - name: Package (auto-copy deps)
+      # Copy required DLLs manually from /mingw64/bin
+      - name: Package
         shell: msys2 {0}
         run: |
           set -e
-          DIST="dist"; mkdir -p "$DIST"
-          cp -v build/whiteboard.exe "$DIST/"
+          DIST="dist"
+          mkdir -p "$DIST"
+          cp -v build/whiteboard.exe "$DIST"/
 
-          # List all dependent DLLs and copy them next to the EXE
-          ntldd -R -L "$DIST/whiteboard.exe" | awk '/=> \// {print $3}' | while read -r dll; do
-            echo "Copy: $dll"
-            cp -v "$dll" "$DIST/" || true
-          done
+          BIN="/mingw64/bin"
+          cp -v $BIN/libsfml-*-2.dll "$DIST"/ || true
+          cp -v $BIN/libfreetype-6.dll "$DIST"/ || true
+          cp -v $BIN/libjpeg-8.dll "$DIST"/ || true
+          cp -v $BIN/zlib1.dll "$DIST"/ || true
+          cp -v $BIN/libbz2-1.dll "$DIST"/ || true
+          cp -v $BIN/libopenal-1.dll "$DIST"/ || true
+          cp -v $BIN/libstdc++-6.dll "$DIST"/ || true
+          cp -v $BIN/libgcc_s_seh-1.dll "$DIST"/ || true
+          cp -v $BIN/libwinpthread-1.dll "$DIST"/ || true
 
-          # Zip it
           echo "Double-click whiteboard.exe to run." > "$DIST/README.txt"
           7z a -tzip whiteboard-windows.zip "$DIST"/*
 
@@ -60,9 +64,3 @@ jobs:
         with:
           name: whiteboard-windows
           path: whiteboard-windows.zip
-
-      - name: Release (tag only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: whiteboard-windows.zip
