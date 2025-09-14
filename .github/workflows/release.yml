@@ -3,17 +3,16 @@ name: Build & Release (Windows - MSYS2)
 on:
   workflow_dispatch:
   push:
-    tags: [ 'v*' ]   # optional: publish a Release when you push a tag like v1.0.0
+    tags: [ 'v*' ]
 
 jobs:
   win-mingw:
     runs-on: windows-2022
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install MSYS2 + MinGW64 toolchain + SFML + CMake + Ninja
+      # MSYS2 + MinGW64 + SFML + tools
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -23,8 +22,9 @@ jobs:
             mingw-w64-x86_64-sfml
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            ntldd-git
 
-      # Configure + build using MinGW64 (no vcpkg required)
+      # Configure & build (MinGW64)
       - name: Configure (Ninja, Release)
         shell: msys2 {0}
         run: |
@@ -37,28 +37,22 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build --config Release
 
-      # Package EXE + needed DLLs from Mingw64 bin
-      - name: Package
-        shell: bash
+      # Collect ALL required DLLs using ntldd (recursive)
+      - name: Package (auto-copy deps)
+        shell: msys2 {0}
         run: |
           set -e
-          DIST="dist"
-          mkdir -p "$DIST"
-          cp -v build/whiteboard.exe "$DIST"/
+          DIST="dist"; mkdir -p "$DIST"
+          cp -v build/whiteboard.exe "$DIST/"
 
-          # Gather SFML and common runtime dlls
-          BIN="/mingw64/bin"
-          cp -v $BIN/libsfml-*-2.dll "$DIST"/ || true
-          cp -v $BIN/libfreetype-6.dll "$DIST"/ || true
-          cp -v $BIN/libjpeg-8.dll "$DIST"/ || true
-          cp -v $BIN/zlib1.dll "$DIST"/ || true
-          cp -v $BIN/libbz2-1.dll "$DIST"/ || true
-          cp -v $BIN/libopenal-1.dll "$DIST"/ || true
-          cp -v $BIN/libstdc++-6.dll "$DIST"/ || true
-          cp -v $BIN/libgcc_s_seh-1.dll "$DIST"/ || true
-          cp -v $BIN/libwinpthread-1.dll "$DIST"/ || true
+          # List all dependent DLLs and copy them next to the EXE
+          ntldd -R -L "$DIST/whiteboard.exe" | awk '/=> \// {print $3}' | while read -r dll; do
+            echo "Copy: $dll"
+            cp -v "$dll" "$DIST/" || true
+          done
 
-          printf "Double-click whiteboard.exe to run.\n" > "$DIST/README.txt"
+          # Zip it
+          echo "Double-click whiteboard.exe to run." > "$DIST/README.txt"
           7z a -tzip whiteboard-windows.zip "$DIST"/*
 
       - name: Upload artifact
@@ -67,7 +61,6 @@ jobs:
           name: whiteboard-windows
           path: whiteboard-windows.zip
 
-      # Optional: publish a GitHub Release if you pushed a tag vX.Y.Z
       - name: Release (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
